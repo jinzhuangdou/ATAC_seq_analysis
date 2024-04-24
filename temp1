@@ -1,0 +1,65 @@
+#BSUB -W 10:00
+#BSUB -L /bin/bash
+#BSUB -o /rsrch3/scratch/bcb/jdou1/PROJECT/log/%J.out
+#BSUB -e /rsrch3/scratch/bcb/jdou1/PROJECT/log/%J.err
+#BSUB -cwd  /rsrch3/scratch/bcb/jdou1/PROJECT/
+#BSUB -q medium
+#BSUB -n 16
+#BSUB -u jdou1@mdanderson.org
+#BSUB -M 50
+#BSUB -R rusage[mem=50]
+#BSUB -J job
+#BSUB -P project_name
+#PBS -S /bin/bash
+
+reference=/rsrch3/scratch/bcb/jdou1/PM1645_CRISPR/hg38/genome
+sample=samplename
+data_dir="/rsrch4/home/genetics/htep/PI/krezvani/PROJECT_IN"
+result_dir="/rsrch3/scratch/bcb/jdou1/PROJECT/"
+mkdir $result_dir/${sample}
+outdir=$result_dir/${sample}
+
+#cd /rsrch4/home/genetics/htep/PI/krezvani/SR-KO-cells_NGS288/$sample
+r1=${data_dir}/${sample}/FLAG1
+r2=${data_dir}/${sample}/FLAG2
+flag=${outdir}/${sample}.last.bam.bai
+
+if [ ! -f $flag ]; then
+	module load bwa
+	module load samtools 
+	bwa mem -t16 -T0 $reference $r1 $r2 | samtools view -F 1024 -hb -o $outdir/${sample}_L001.bam 
+	samtools sort $outdir/${sample}_L001.bam -o $outdir/${sample}_L001_sorted.bam
+	samtools index $outdir/${sample}_L001_sorted.bam
+
+
+	r1=${data_dir}/${sample}/FLAG3
+	r2=${data_dir}/${sample}/FLAG4
+
+	bwa mem -t16 -T0 $reference $r1 $r2 |  samtools view -F 1024 -hb -o $outdir/${sample}_L002.bam
+	samtools sort $outdir/${sample}_L002.bam -o $outdir/${sample}_L002_sorted.bam
+	samtools index $outdir/${sample}_L002_sorted.bam
+
+
+	samtools  merge   $outdir/${sample}.merge.bam    $outdir/${sample}_L001_sorted.bam   $outdir/${sample}_L002_sorted.bam   -@24
+	samtools  sort  $outdir/${sample}.merge.bam   -o   $outdir/${sample}.merge.sort.bam 
+	samtools index  $outdir/${sample}.merge.sort.bam
+
+	samtools="/risapps/rhel7/samtools/1.15/bin/samtools"
+	reference=/rsrch3/scratch/bcb/jdou1/PM1645_CRISPR/hg38/genome
+
+#
+## use --ATACshift
+##
+	module load macs2/2.1.2
+	alignmentSieve="/rsrch3/scratch/bcb/jdou1/NL-Cord_PM1696/alignmentSieve"
+	${alignmentSieve}  --numberOfProcessors 48 --ATACshift --bam ${outdir}/${sample}.merge.sort.bam  -o  ${outdir}/${sample}.merged.tmp.bam
+##
+## # the bam file needs to be sorted again
+	${samtools} sort -@ 24 -O bam -o  ${outdir}/${sample}.last.bam  ${outdir}/${sample}.merged.tmp.bam
+	${samtools} index -@ 24 ${outdir}/${sample}.last.bam
+rm ${outdir}/${sample}.merged.tmp.bam
+##
+## # -f BAMPE, use paired-end information
+## # --keep-dup all, keep all duplicate reads.
+	macs2 callpeak -f BAMPE -g hs --keep-dup all --cutoff-analysis -n   ${sample}  -t   ${outdir}/${sample}.last.bam   --outdir macs2_${sample}
+fi
